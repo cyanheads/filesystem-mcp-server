@@ -1,5 +1,6 @@
 # Filesystem MCP Server
 
+[![smithery badge](https://smithery.ai/badge/@cyanheads/filesystem-mcp-server)](https://smithery.ai/server/@cyanheads/filesystem-mcp-server)
 [![TypeScript](https://img.shields.io/badge/TypeScript-^5.8.3-blue.svg)](https://www.typescriptlang.org/)
 [![Model Context Protocol](https://img.shields.io/badge/MCP-^1.9.0-green.svg)](https://modelcontextprotocol.io/)
 [![Version](https://img.shields.io/badge/Version-1.0.0-blue.svg)]()
@@ -100,6 +101,14 @@ flowchart TB
 - **Type Safety**: Fully implemented in TypeScript for improved reliability and maintainability.
 
 ## Installation
+
+### Installing via Smithery
+
+To install Filesystem MCP for Claude Desktop automatically via [Smithery](https://smithery.ai/server/@cyanheads/filesystem-mcp-server):
+
+```bash
+npx -y @smithery/cli install @cyanheads/filesystem-mcp-server --client claude
+```
 
 ### Steps
 

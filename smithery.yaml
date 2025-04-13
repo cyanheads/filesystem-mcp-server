@@ -1,0 +1,28 @@
+# Smithery configuration file: https://smithery.ai/docs/config#smitheryyaml
+
+startCommand:
+  type: stdio
+  configSchema:
+    # JSON Schema defining the configuration options for the MCP.
+    type: object
+    properties:
+      fsBaseDirectory:
+        type: string
+        description: Optional base directory restricting file operations
+      logLevel:
+        type: string
+        description: Logging level (e.g., info, debug, error)
+  commandFunction:
+    # A JS function that produces the CLI command based on the given config to start the MCP on stdio.
+    |-
+    (config) => ({
+      command: 'node',
+      args: ['dist/index.js'],
+      env: {
+        FS_BASE_DIRECTORY: config.fsBaseDirectory || '',
+        LOG_LEVEL: config.logLevel || 'info'
+      }
+    })
+  exampleConfig:
+    fsBaseDirectory: /data/files
+    logLevel: debug
