@@ -98,13 +98,16 @@ flowchart TB
 
 - **Comprehensive File Operations**: Tools for reading, writing, listing, deleting, moving, and copying files and directories.
 - **Targeted Updates**: `update_file` tool allows precise search-and-replace operations within files, supporting plain text and regex.
-- **Session-Aware Path Management**: `set_filesystem_default` tool establishes a default working directory for resolving relative paths during a session.
+- **Session-Aware Path Management**: 
+  - `set_filesystem_default` tool establishes a current working directory for resolving relative paths during a session. The path must exist, be a directory, and (if filesystem scope restriction is set) must be within the allowed scope.
+  - `get_filesystem_info` tool provides visibility into the current filesystem state, including the working directory and scope restriction.
 - **Dual Transport Support**:
   - **STDIO**: For direct, efficient communication when run as a child process.
   - **HTTP**: For network-based interaction, featuring RESTful endpoints, Server-Sent Events (SSE) for streaming, and JWT-based authentication.
 - **Security First**:
   - Built-in path sanitization prevents directory traversal attacks.
-  - JWT authentication for HTTP transport.
+  - JWT authentication for HTTP transport (configure `MCP_AUTH_SECRET_KEY`).
+  - Filesystem scope restriction via `FS_BASE_DIRECTORY` to limit operations to a specific directory tree.
   - Input validation with Zod.
 - **Robust Foundation**: Includes production-grade utilities, now reorganized for better modularity:
   - **Internal Utilities**: Context-aware logging (Winston), standardized error handling (`McpError`, `ErrorHandler`), request context management.
@@ -133,6 +136,16 @@ flowchart TB
     ```
     This compiles the TypeScript code to JavaScript in the `dist/` directory and makes the main script executable. The executable will be located at `dist/index.js`.
 
+### JWT Token Generation (for HTTP Transport)
+
+To generate JWT tokens for HTTP transport authentication:
+
+```bash
+npm run generate-jwt
+```
+
+This will output a JWT token that can be used with the HTTP transport. Set `MCP_AUTH_SECRET_KEY` in your `.env` file first to use this script.
+
 ## Configuration
 
 Configure the server using environment variables (a `.env` file is supported):
@@ -149,12 +162,12 @@ Configure the server using environment variables (a `.env` file is supported):
   - **If `http` is selected:**
     - **`MCP_HTTP_PORT`** (Optional): Port for the HTTP server. Defaults to `3010`.
     - **`MCP_HTTP_HOST`** (Optional): Host for the HTTP server. Defaults to `127.0.0.1`.
-    - **`MCP_ALLOWED_ORIGINS`** (Optional): Comma-separated list of allowed CORS origins (e.g., `http://localhost:3000,https://example.com`).
     - **`MCP_AUTH_SECRET_KEY`** (Required for HTTP Auth): A secure secret key (at least 32 characters long) for JWT authentication. **CRITICAL for production.**
 
 **Filesystem Security:**
 
 - **`FS_BASE_DIRECTORY`** (Optional): Defines the root directory for all filesystem operations. This can be an **absolute path** or a **path relative to the project root** (e.g., `./data_sandbox`). If set, the server's tools will be restricted to accessing files and directories only within this specified (and resolved absolute) path and its subdirectories. This is a crucial security feature to prevent unintended access to other parts of the filesystem. If not set (which is not recommended for production environments), a warning will be logged, and operations will not be restricted.
+- **`FS_DEFAULT_DIRECTORY`** (Optional): Sets the initial default working directory for filesystem operations. This can be an **absolute path** or a **path relative to the project root**. If set, relative paths will be resolved against this directory at server startup. Must be a valid, existing directory and (if `FS_BASE_DIRECTORY` is set) must be within the base directory scope.
 
 **LLM & API Integration (Optional):**
 
@@ -220,7 +233,8 @@ The server exposes the following tools for filesystem interaction:
 
 | Tool                         | Description                                                                                                                                                                                                                                                                                                        |
 | :--------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **`set_filesystem_default`** | Sets a default absolute path for the current session. Relative paths used in subsequent tool calls will be resolved against this default. Resets on server restart.                                                                                                                                                |
+| **`get_filesystem_info`**    | Gets the current working directory and filesystem scope restriction. Returns `currentWorkingDirectory` (null if not set) and `filesystemScopeRestriction` (null if not configured). Use this to check the current filesystem state before using other tools.                                                       |
+| **`set_filesystem_default`** | Sets a default absolute path for the current session. The path must exist and be a directory. If a filesystem scope restriction is configured, the path must be within that scope. Relative paths used in subsequent tool calls will be resolved against this default. Resets on server restart.                    |
 | **`read_file`**              | Reads the entire content of a specified file as UTF-8 text. Accepts relative (resolved against default) or absolute paths.                                                                                                                                                                                         |
 | **`write_file`**             | Writes content to a specified file. Creates the file (and necessary parent directories) if it doesn't exist, or overwrites it if it does. Accepts relative or absolute paths.                                                                                                                                      |
 | **`update_file`**            | Performs targeted search-and-replace operations within an existing file using an array of `{search, replace}` blocks. Ideal for localized changes. Supports plain text or regex search (`useRegex: true`) and replacing all occurrences (`replaceAll: true`). Accepts relative or absolute paths. File must exist. |

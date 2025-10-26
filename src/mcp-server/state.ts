@@ -1,4 +1,5 @@
 import path from 'path';
+import { existsSync, statSync } from 'fs';
 import { config } from '../config/index.js';
 import { BaseErrorCode, McpError } from '../types-global/errors.js';
 import { logger } from '../utils/internal/logger.js';
@@ -13,7 +14,7 @@ class ServerState {
   private defaultFilesystemPath: string | null = null;
   private fsBaseDirectory: string | null = null;
 
-  constructor() {
+  constructor(skipLogging: boolean = false) {
     this.fsBaseDirectory = config.fsBaseDirectory || null;
     if (this.fsBaseDirectory) {
       // Ensure fsBaseDirectory itself is sanitized and absolute for internal use
@@ -21,10 +22,27 @@ class ServerState {
       try {
         const sanitizedBase = sanitization.sanitizePath(this.fsBaseDirectory, { allowAbsolute: true, toPosix: true });
         this.fsBaseDirectory = sanitizedBase.sanitizedPath;
-        logger.info(`Filesystem operations will be restricted to base directory: ${this.fsBaseDirectory}`, initContext);
+        if (!skipLogging) {
+          logger.info(`Filesystem operations will be restricted to base directory: ${this.fsBaseDirectory}`, initContext);
+        }
       } catch (error) {
-        logger.error(`Invalid FS_BASE_DIRECTORY configured: ${this.fsBaseDirectory}. It will be ignored.`, { ...initContext, error: error instanceof Error ? error.message : String(error) });
+        if (!skipLogging) {
+          logger.error(`Invalid FS_BASE_DIRECTORY configured: ${this.fsBaseDirectory}. It will be ignored.`, { ...initContext, error: error instanceof Error ? error.message : String(error) });
+        }
         this.fsBaseDirectory = null; // Disable if invalid
+      }
+    }
+
+    // Initialize default filesystem path if configured
+    if (config.fsDefaultDirectory) {
+      const initContext = requestContextService.createRequestContext({ operation: 'ServerStateInit' });
+      try {
+        this.initializeDefaultFilesystemPath(config.fsDefaultDirectory, initContext, skipLogging);
+      } catch (error) {
+        if (!skipLogging) {
+          logger.error(`Failed to initialize default filesystem path from config: ${config.fsDefaultDirectory}`, { ...initContext, error: error instanceof Error ? error.message : String(error) });
+        }
+        // Don't throw here, just log the error and continue without default path
       }
     }
   }
@@ -35,17 +53,38 @@ class ServerState {
    *
    * @param newPath - The absolute path to set as default.
    * @param context - The request context for logging.
-   * @throws {McpError} If the path is invalid or not absolute.
+   * @throws {McpError} If the path is invalid, not absolute, doesn't exist, is not a directory, or is outside FS_BASE_DIRECTORY scope.
    */
   setDefaultFilesystemPath(newPath: string, context: RequestContext): void {
     logger.debug(`Attempting to set default filesystem path: ${newPath}`, context);
     try {
       // Ensure the path is absolute before storing
       if (!path.isAbsolute(newPath)) {
-         throw new McpError(BaseErrorCode.VALIDATION_ERROR, 'Default path must be absolute.', { ...context, path: newPath });
+        throw new McpError(BaseErrorCode.VALIDATION_ERROR, 'Default path must be absolute.', { ...context, path: newPath });
       }
+
+      // Check if the path exists
+      if (!existsSync(newPath)) {
+        throw new McpError(BaseErrorCode.VALIDATION_ERROR, 'Default path does not exist.', { ...context, path: newPath });
+      }
+
+      // Check if it's a directory
+      const stats = statSync(newPath);
+      if (!stats.isDirectory()) {
+        throw new McpError(BaseErrorCode.VALIDATION_ERROR, 'Default path must be a directory.', { ...context, path: newPath });
+      }
+
+      // If FS_BASE_DIRECTORY is set, ensure the path is within scope
+      if (this.fsBaseDirectory) {
+        const normalizedFsBaseDirectory = path.normalize(this.fsBaseDirectory);
+        const normalizedNewPath = path.normalize(newPath);
+
+        if (!normalizedNewPath.startsWith(normalizedFsBaseDirectory + path.sep) && normalizedNewPath !== normalizedFsBaseDirectory) {
+          throw new McpError(BaseErrorCode.FORBIDDEN, `Default path must be within the configured FS_BASE_DIRECTORY scope: ${this.fsBaseDirectory}`, { ...context, path: newPath, fsBaseDirectory: this.fsBaseDirectory });
+        }
+      }
+
       // Sanitize the absolute path (mainly for normalization and basic checks)
-      // We don't restrict to a rootDir here as it's a user-provided default.
       const sanitizedPathInfo = sanitization.sanitizePath(newPath, { allowAbsolute: true, toPosix: true });
 
       this.defaultFilesystemPath = sanitizedPathInfo.sanitizedPath;
@@ -67,6 +106,55 @@ class ServerState {
    */
   getDefaultFilesystemPath(): string | null {
     return this.defaultFilesystemPath;
+  }
+
+  /**
+   * Gets the configured FS_BASE_DIRECTORY.
+   *
+   * @returns The absolute base directory path or null if not set.
+   */
+  getFsBaseDirectory(): string | null {
+    return this.fsBaseDirectory;
+  }
+
+  /**
+   * Initializes the default filesystem path at server startup.
+   * This method can be called during server initialization to set an initial default path.
+   * Uses the same validation as setDefaultFilesystemPath.
+   *
+   * @param initialPath - The absolute path to set as initial default.
+   * @param context - The request context for logging.
+   * @param skipLogging - Whether to skip logging (used during early initialization).
+   * @throws {McpError} If the path is invalid, doesn't exist, etc.
+   */
+  initializeDefaultFilesystemPath(initialPath: string, context: RequestContext, skipLogging: boolean = false): void {
+    if (this.defaultFilesystemPath !== null) {
+      if (!skipLogging) {
+        logger.warning('Default filesystem path already set, skipping initialization.', context);
+      }
+      return;
+    }
+
+    if (!skipLogging) {
+      logger.info(`Initializing default filesystem path at startup: ${initialPath}`, context);
+    }
+    this.setDefaultFilesystemPath(initialPath, context);
+  }
+
+  /**
+   * Re-initializes the ServerState with logging enabled after logger is ready.
+   * This is called after logger initialization to log configuration that was skipped earlier.
+   *
+   * @param context - The request context for logging.
+   */
+  reinitializeWithLogging(context: RequestContext): void {
+    if (this.fsBaseDirectory) {
+      logger.info(`Filesystem operations will be restricted to base directory: ${this.fsBaseDirectory}`, context);
+    }
+
+    if (config.fsDefaultDirectory && this.defaultFilesystemPath) {
+      logger.info(`Default filesystem path initialized at startup: ${this.defaultFilesystemPath}`, context);
+    }
   }
 
   /**
@@ -92,12 +180,22 @@ class ServerState {
     logger.debug(`Resolving path: ${requestedPath}`, { ...context, defaultPath: this.defaultFilesystemPath, fsBaseDirectory: this.fsBaseDirectory });
 
     let absolutePath: string;
+    let wasAbsolute = path.isAbsolute(requestedPath);
 
-    if (path.isAbsolute(requestedPath)) {
-      absolutePath = requestedPath;
-      logger.debug('Provided path is absolute.', { ...context, path: absolutePath });
+    if (this.defaultFilesystemPath) {
+      // When default is set, treat all paths as relative to default, stripping leading '/' if present
+      let relativePath = requestedPath;
+      if (relativePath.startsWith('/')) {
+        relativePath = relativePath.slice(1);
+        wasAbsolute = false; // Treat as relative for boundary checks
+      }
+      absolutePath = path.join(this.defaultFilesystemPath, relativePath);
+      logger.debug(`Resolved path against default: ${absolutePath}`, { ...context, requestedPath, relativePath, defaultPath: this.defaultFilesystemPath });
     } else {
-      if (!this.defaultFilesystemPath) {
+      if (wasAbsolute) {
+        absolutePath = requestedPath;
+        logger.debug('Provided path is absolute.', { ...context, path: absolutePath });
+      } else {
         logger.warning('Relative path provided but no default path is set.', { ...context, path: requestedPath });
         throw new McpError(
           BaseErrorCode.VALIDATION_ERROR,
@@ -105,10 +203,8 @@ class ServerState {
           { ...context, path: requestedPath }
         );
       }
-      absolutePath = path.join(this.defaultFilesystemPath, requestedPath);
-      logger.debug(`Resolved relative path against default: ${absolutePath}`, { ...context, relativePath: requestedPath, defaultPath: this.defaultFilesystemPath });
     }
-    
+
     let sanitizedAbsolutePath: string;
     try {
       // Sanitize the path first. allowAbsolute is true as we've resolved it.
@@ -117,15 +213,15 @@ class ServerState {
       sanitizedAbsolutePath = sanitizedPathInfo.sanitizedPath;
       logger.debug(`Sanitized resolved path: ${sanitizedAbsolutePath}`, { ...context, originalPath: absolutePath });
     } catch (error) {
-       logger.error(`Failed to sanitize resolved path: ${absolutePath}`, { ...context, error: error instanceof Error ? error.message : String(error) });
-       if (error instanceof McpError) {
-         throw error; // Rethrow validation errors from sanitizePath
-       }
-       throw new McpError(BaseErrorCode.INTERNAL_ERROR, `Failed to process path: ${error instanceof Error ? error.message : String(error)}`, { ...context, path: absolutePath, originalError: error });
+      logger.error(`Failed to sanitize resolved path: ${absolutePath}`, { ...context, error: error instanceof Error ? error.message : String(error) });
+      if (error instanceof McpError) {
+        throw error; // Rethrow validation errors from sanitizePath
+      }
+      throw new McpError(BaseErrorCode.INTERNAL_ERROR, `Failed to process path: ${error instanceof Error ? error.message : String(error)}`, { ...context, path: absolutePath, originalError: error });
     }
 
-    // Enforce FS_BASE_DIRECTORY boundary if it's set
-    if (this.fsBaseDirectory) {
+    // Enforce FS_BASE_DIRECTORY boundary if it's set and the path was relative
+    if (this.fsBaseDirectory && !wasAbsolute) {
       // Normalize both paths for a reliable comparison
       const normalizedFsBaseDirectory = path.normalize(this.fsBaseDirectory);
       const normalizedSanitizedAbsolutePath = path.normalize(sanitizedAbsolutePath);
@@ -150,4 +246,6 @@ class ServerState {
 }
 
 // Export a singleton instance
-export const serverState = new ServerState();
+// Note: Created with skipLogging=true to avoid logger errors during early initialization.
+// Logger will be properly initialized later in the startup sequence.
+export const serverState = new ServerState(true);

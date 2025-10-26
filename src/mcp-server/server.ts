@@ -22,6 +22,7 @@ import { registerCopyPathTool } from './tools/copyPath/index.js';
 import { registerCreateDirectoryTool } from './tools/createDirectory/index.js';
 import { registerDeleteDirectoryTool } from './tools/deleteDirectory/index.js';
 import { registerDeleteFileTool } from './tools/deleteFile/index.js';
+import { registerGetFilesystemInfoTool } from './tools/getFilesystemInfo/index.js';
 import { registerListFilesTool } from './tools/listFiles/index.js';
 import { registerMovePathTool } from './tools/movePath/index.js';
 import { registerReadFileTool } from './tools/readFile/index.js';
@@ -81,6 +82,7 @@ async function createMcpServerInstance(): Promise<McpServer> {
     const registrationPromises = [
       registerReadFileTool(server),
       registerSetFilesystemDefaultTool(server),
+      registerGetFilesystemInfoTool(server),
       registerWriteFileTool(server),
       registerUpdateFileTool(server),
       registerListFilesTool(server),

@@ -25,7 +25,7 @@ startCommand:
         default: ""
         description: "Optional base directory for all filesystem operations. If set, tools cannot access paths outside this directory. Must be an absolute path if provided."
       # Add other relevant env vars from src/config/index.ts if they should be configurable via Smithery
-      # For example, MCP_HTTP_HOST, MCP_ALLOWED_ORIGINS, MCP_AUTH_SECRET_KEY could be added here
+      # For example, MCP_HTTP_HOST, MCP_AUTH_SECRET_KEY could be added here
       # if they need to be set dynamically when the server is started by Smithery.
       # For now, keeping it simple with the core ones.
   commandFunction: |

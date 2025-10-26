@@ -3,9 +3,10 @@ import { config, environment } from "./config/index.js";
 import { initializeAndStartServer } from "./mcp-server/server.js"; // Changed import
 import { BaseErrorCode } from "./types-global/errors.js";
 import { ErrorHandler } from "./utils/internal/errorHandler.js";
-import { logger } from "./utils/internal/logger.js";
+import { logger, McpLogLevel } from "./utils/internal/logger.js";
 // Import the service instance instead of the standalone function
 import { requestContextService } from "./utils/internal/requestContext.js";
+import { serverState } from "./mcp-server/state.js"; // Import serverState to reinitialize after logger
 
 // Define a type alias for the server instance for better readability
 // initializeAndStartServer returns Promise<void | McpServer>, we'll handle the potential void/undefined later if needed
@@ -64,6 +65,9 @@ const shutdown = async (signal: string) => {
  * for graceful shutdown and error handling.
  */
 const start = async () => {
+  // Initialize the logger first
+  await logger.initialize(config.logLevel as McpLogLevel);
+
   // Create application-level request context using the service instance
   const startupContext = requestContextService.createRequestContext({
     operation: 'ServerStartup',
@@ -71,6 +75,9 @@ const start = async () => {
     appVersion: config.mcpServerVersion,
     environment: environment // Use imported environment
   });
+
+  // Re-initialize ServerState logging after logger is ready
+  serverState.reinitializeWithLogging(startupContext);
 
   logger.info(`Starting ${config.mcpServerName} v${config.mcpServerVersion}...`, startupContext);
 

@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- **JWT Token Generation Script**: New `scripts/generate-jwt.js` script to generate JWT tokens for HTTP transport authentication. Usage: `npm run generate-jwt`.
+
+### Changed
+- **Path Resolution**: Modified `resolvePath` in `src/mcp-server/state.ts` to treat paths starting with `/` as relative to the default filesystem path when one is set, allowing both `Desktop` and `/Desktop` to resolve to the same location.
+- **get_filesystem_info Tool Output Fields**: Renamed output fields for clarity:
+  - `currentDefaultPath` → `currentWorkingDirectory` (represents the current working directory for relative path resolution)
+  - `fsBaseDirectory` → `filesystemScopeRestriction` (represents the filesystem scope restriction if configured)
+- **HTTP Transport**: Removed origin validation feature (MCP_ALLOWED_ORIGINS). HTTP transport now provides streamable MCP communication without CORS origin checking. Authentication is still available via JWT (MCP_AUTH_SECRET_KEY).
+- **Logger Initialization**: Fixed "Logger not initialized; message dropped" errors by:
+  - Deferring detailed logging of ServerState initialization until after logger is ready
+  - Added `skipLogging` parameter to ServerState constructor for early initialization
+  - Added `reinitializeWithLogging()` method to log configuration after logger initialization in `src/index.ts`
+  - This ensures all logging messages are properly captured from server startup
+
+### Fixed
+- Logger initialization timing issue where ServerState configuration logs were dropped during early startup
+
 ## [1.0.4] - 2025-05-23
 
 ### Changed

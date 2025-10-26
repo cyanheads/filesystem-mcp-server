@@ -1,0 +1,1 @@
+export { registerGetFilesystemInfoTool } from './registration.js';

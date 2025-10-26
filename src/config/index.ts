@@ -100,8 +100,6 @@ const EnvSchema = z.object({
   MCP_HTTP_PORT: z.coerce.number().int().positive().default(3010),
   /** HTTP server host (if MCP_TRANSPORT_TYPE is "http"). Default: "127.0.0.1". */
   MCP_HTTP_HOST: z.string().default("127.0.0.1"),
-  /** Optional. Comma-separated allowed origins for CORS (HTTP transport). */
-  MCP_ALLOWED_ORIGINS: z.string().optional(),
   /** Optional. Secret key (min 32 chars) for auth tokens (HTTP transport). CRITICAL for production. */
   MCP_AUTH_SECRET_KEY: z
     .string()
@@ -166,6 +164,8 @@ const EnvSchema = z.object({
   OAUTH_PROXY_DEFAULT_CLIENT_REDIRECT_URIS: z.string().optional(),
   /** Optional. Base directory for all filesystem operations. If set, tools cannot access paths outside this directory. Can be an absolute path or relative to the project root. */
   FS_BASE_DIRECTORY: z.string().optional(),
+  /** Optional. Default working directory for filesystem operations. If set, relative paths will be resolved against this directory. Must be an absolute path or relative to the project root. */
+  FS_DEFAULT_DIRECTORY: z.string().optional(),
 });
 
 const parsedEnv = EnvSchema.safeParse(process.env);
@@ -193,6 +193,17 @@ if (env.FS_BASE_DIRECTORY && !path.isAbsolute(env.FS_BASE_DIRECTORY)) {
   }
 }
 
+// Resolve FS_DEFAULT_DIRECTORY if it's relative
+let resolvedFsDefaultDirectory: string | undefined = env.FS_DEFAULT_DIRECTORY;
+if (env.FS_DEFAULT_DIRECTORY && !path.isAbsolute(env.FS_DEFAULT_DIRECTORY)) {
+  resolvedFsDefaultDirectory = path.resolve(projectRoot, env.FS_DEFAULT_DIRECTORY);
+  if (process.stdout.isTTY) {
+    console.log(
+      `Info: Relative FS_DEFAULT_DIRECTORY "${env.FS_DEFAULT_DIRECTORY}" resolved to "${resolvedFsDefaultDirectory}".`
+    );
+  }
+}
+
 if (process.stdout.isTTY) {
   if (resolvedFsBaseDirectory) {
     // Ensure the resolved directory exists, or attempt to create it.
@@ -209,7 +220,7 @@ if (process.stdout.isTTY) {
         }
       }
       if (resolvedFsBaseDirectory) {
-         console.log(
+        console.log(
           `Info: Filesystem operations will be restricted to base directory: ${resolvedFsBaseDirectory}`
         );
       }
@@ -328,10 +339,6 @@ export const config = {
   mcpHttpPort: env.MCP_HTTP_PORT,
   /** HTTP server host (if http transport). From `MCP_HTTP_HOST` env var. Default: "127.0.0.1". */
   mcpHttpHost: env.MCP_HTTP_HOST,
-  /** Array of allowed CORS origins (http transport). From `MCP_ALLOWED_ORIGINS` (comma-separated). */
-  mcpAllowedOrigins: env.MCP_ALLOWED_ORIGINS?.split(",")
-    .map((origin) => origin.trim())
-    .filter(Boolean),
   /** Auth secret key (JWTs, http transport). From `MCP_AUTH_SECRET_KEY`. CRITICAL. */
   mcpAuthSecretKey: env.MCP_AUTH_SECRET_KEY,
 
@@ -359,25 +366,27 @@ export const config = {
   /** OAuth Proxy configurations. Undefined if no related env vars are set. */
   oauthProxy:
     env.OAUTH_PROXY_AUTHORIZATION_URL ||
-    env.OAUTH_PROXY_TOKEN_URL ||
-    env.OAUTH_PROXY_REVOCATION_URL ||
-    env.OAUTH_PROXY_ISSUER_URL ||
-    env.OAUTH_PROXY_SERVICE_DOCUMENTATION_URL ||
-    env.OAUTH_PROXY_DEFAULT_CLIENT_REDIRECT_URIS
+      env.OAUTH_PROXY_TOKEN_URL ||
+      env.OAUTH_PROXY_REVOCATION_URL ||
+      env.OAUTH_PROXY_ISSUER_URL ||
+      env.OAUTH_PROXY_SERVICE_DOCUMENTATION_URL ||
+      env.OAUTH_PROXY_DEFAULT_CLIENT_REDIRECT_URIS
       ? {
-          authorizationUrl: env.OAUTH_PROXY_AUTHORIZATION_URL,
-          tokenUrl: env.OAUTH_PROXY_TOKEN_URL,
-          revocationUrl: env.OAUTH_PROXY_REVOCATION_URL,
-          issuerUrl: env.OAUTH_PROXY_ISSUER_URL,
-          serviceDocumentationUrl: env.OAUTH_PROXY_SERVICE_DOCUMENTATION_URL,
-          defaultClientRedirectUris:
-            env.OAUTH_PROXY_DEFAULT_CLIENT_REDIRECT_URIS?.split(",")
-              .map((uri) => uri.trim())
-              .filter(Boolean),
-        }
+        authorizationUrl: env.OAUTH_PROXY_AUTHORIZATION_URL,
+        tokenUrl: env.OAUTH_PROXY_TOKEN_URL,
+        revocationUrl: env.OAUTH_PROXY_REVOCATION_URL,
+        issuerUrl: env.OAUTH_PROXY_ISSUER_URL,
+        serviceDocumentationUrl: env.OAUTH_PROXY_SERVICE_DOCUMENTATION_URL,
+        defaultClientRedirectUris:
+          env.OAUTH_PROXY_DEFAULT_CLIENT_REDIRECT_URIS?.split(",")
+            .map((uri) => uri.trim())
+            .filter(Boolean),
+      }
       : undefined,
   /** Base directory for filesystem operations. From `FS_BASE_DIRECTORY`. If set, operations are restricted to this path. Will be an absolute path. */
   fsBaseDirectory: resolvedFsBaseDirectory,
+  /** Default working directory for filesystem operations. From `FS_DEFAULT_DIRECTORY`. If set, relative paths will be resolved against this directory. Will be an absolute path. */
+  fsDefaultDirectory: resolvedFsDefaultDirectory,
 };
 
 /**
