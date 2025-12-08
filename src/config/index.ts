@@ -90,6 +90,8 @@ const EnvSchema = z.object({
   MCP_SERVER_VERSION: z.string().optional(),
   /** Minimum logging level. See `McpLogLevel` in logger utility. Default: "debug". */
   MCP_LOG_LEVEL: z.string().default("debug"),
+  /** Force console logging output regardless of TTY status. Useful for Docker containers. Default: false. */
+  MCP_CONSOLE_LOG: z.coerce.boolean().default(false),
   /** Directory for log files. Defaults to "logs" in project root. */
   LOGS_DIR: z.string().default(path.join(projectRoot, "logs")),
   /** Runtime environment (e.g., "development", "production"). Default: "development". */
@@ -318,6 +320,8 @@ export const config = {
   mcpServerVersion: env.MCP_SERVER_VERSION || pkg.version,
   /** Logging level. From `MCP_LOG_LEVEL` env var. Default: "debug". */
   logLevel: env.MCP_LOG_LEVEL,
+  /** Force console logging regardless of TTY. From `MCP_CONSOLE_LOG` env var. Default: false. */
+  mcpConsoleLog: env.MCP_CONSOLE_LOG,
   /** Absolute path to the logs directory. From `LOGS_DIR` env var. */
   logsPath: validatedLogsPath,
   /** Runtime environment. From `NODE_ENV` env var. Default: "development". */

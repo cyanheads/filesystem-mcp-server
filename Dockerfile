@@ -38,10 +38,10 @@ RUN apt-get update && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-# Create non-root user and group
+# Create non-root user and group with ID 1001
 # Create app directory and set permissions
-RUN groupadd --system --gid 1987 service-user && \
-    useradd --system --uid 1987 --gid service-user -m service-user && \
+RUN groupadd --system --gid 1001 service-user && \
+    useradd --system --uid 1001 --gid service-user -m service-user && \
     mkdir -p /app && \
     chown -R service-user:service-user /app
 

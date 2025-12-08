@@ -376,19 +376,22 @@ export class Logger {
     const consoleTransport = this.winstonLogger.transports.find(
       (t) => t instanceof winston.transports.Console,
     );
+    // Enable console if: forced via config, OR (debug level AND TTY)
     const shouldHaveConsole =
-      this.currentMcpLevel === "debug" && process.stdout.isTTY;
+      config.mcpConsoleLog || (this.currentMcpLevel === "debug" && process.stdout.isTTY);
     let message: string | null = null;
 
     if (shouldHaveConsole && !consoleTransport) {
       const consoleFormat = createWinstonConsoleFormat();
       this.winstonLogger.add(
         new winston.transports.Console({
-          level: "debug", // Console always logs debug if enabled
+          level: this.currentWinstonLevel, // Use current log level for console
           format: consoleFormat,
         }),
       );
-      message = "Console logging enabled (level: debug, stdout is TTY).";
+      message = config.mcpConsoleLog
+        ? `Console logging enabled (forced via MCP_CONSOLE_LOG, level: ${this.currentMcpLevel}).`
+        : "Console logging enabled (level: debug, stdout is TTY).";
     } else if (!shouldHaveConsole && consoleTransport) {
       this.winstonLogger.remove(consoleTransport);
       message = "Console logging disabled (level not debug or stdout not TTY).";
@@ -416,7 +419,7 @@ export class Logger {
    */
   private ensureInitialized(): boolean {
     if (!this.initialized || !this.winstonLogger) {
-      if (process.stdout.isTTY) {
+      if (process.stdout.isTTY || config.mcpConsoleLog) {
         console.warn("Logger not initialized; message dropped.");
       }
       return false;

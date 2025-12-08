@@ -93,17 +93,26 @@ function isOriginAllowed(req: Request, res: Response): boolean {
   logger.debug("Checking origin allowance", context);
 
   const allowed =
+    // Allow if wildcard is set (with or without origin header)
+    allowedOrigins.includes("*") ||
+    // Allow if origin matches allowed list
     (origin && allowedOrigins.includes(origin)) ||
+    // Allow localhost requests without origin
     (isLocalhostBinding && (!origin || origin === "null"));
 
   if (allowed && origin) {
-    res.setHeader("Access-Control-Allow-Origin", origin);
+    // Use "*" header if wildcard is configured, otherwise echo the specific origin
+    const corsOrigin = allowedOrigins.includes("*") ? "*" : origin;
+    res.setHeader("Access-Control-Allow-Origin", corsOrigin);
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
     res.setHeader(
       "Access-Control-Allow-Headers",
       "Content-Type, Mcp-Session-Id, Last-Event-ID, Authorization",
     );
-    res.setHeader("Access-Control-Allow-Credentials", "true");
+    // Note: credentials can't be used with wildcard origin
+    if (!allowedOrigins.includes("*")) {
+      res.setHeader("Access-Control-Allow-Credentials", "true");
+    }
   } else if (!allowed && origin) {
     logger.warning(`Origin denied: ${origin}`, context);
   }
@@ -590,7 +599,7 @@ export async function startHttpTransport(
       productionNote = ` (via HTTPS, ensure reverse proxy is configured)`;
     }
 
-    if (process.stdout.isTTY) {
+    if (process.stdout.isTTY || config.mcpConsoleLog) {
       console.log(
         `\n🚀 MCP Server running in HTTP mode at: ${serverAddressLog}${productionNote}\n   (MCP Spec: 2025-03-26 Streamable HTTP Transport)\n`,
       );

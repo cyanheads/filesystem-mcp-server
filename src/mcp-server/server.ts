@@ -59,7 +59,6 @@ async function createMcpServerInstance(): Promise<McpServer> {
       version: config.mcpServerVersion,
     },
     capabilities: {
-      logging: {},
       resources: { listChanged: true }, // Assuming dynamic resources might be added later
       tools: { listChanged: true },     // Filesystem tools are dynamically registered
     },
@@ -69,7 +68,6 @@ async function createMcpServerInstance(): Promise<McpServer> {
     { name: config.mcpServerName, version: config.mcpServerVersion },
     {
       capabilities: {
-        logging: {},
         resources: { listChanged: true },
         tools: { listChanged: true },
       },

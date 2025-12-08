@@ -64,6 +64,9 @@ const shutdown = async (signal: string) => {
  * for graceful shutdown and error handling.
  */
 const start = async () => {
+  // Initialize the logger first with configured log level
+  await logger.initialize(config.logLevel as any);
+
   // Create application-level request context using the service instance
   const startupContext = requestContextService.createRequestContext({
     operation: 'ServerStartup',

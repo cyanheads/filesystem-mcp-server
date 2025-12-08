@@ -140,6 +140,7 @@ Configure the server using environment variables (a `.env` file is supported):
 **Core Server Settings:**
 
 - **`MCP_LOG_LEVEL`** (Optional): Minimum logging level (e.g., `debug`, `info`, `warn`, `error`). Defaults to `debug`.
+- **`MCP_CONSOLE_LOG`** (Optional): Set to `true` to force console output regardless of TTY status. Essential for Docker containers where `docker logs` should show server output. Defaults to `false`.
 - **`LOGS_DIR`** (Optional): Directory for log files. Defaults to `./logs` in the project root.
 - **`NODE_ENV`** (Optional): Runtime environment (e.g., `development`, `production`). Defaults to `development`.
 
@@ -170,6 +171,30 @@ Configure the server using environment variables (a `.env` file is supported):
 - **`OAUTH_PROXY_AUTHORIZATION_URL`**, **`OAUTH_PROXY_TOKEN_URL`**, **`OAUTH_PROXY_REVOCATION_URL`**, **`OAUTH_PROXY_ISSUER_URL`**, **`OAUTH_PROXY_SERVICE_DOCUMENTATION_URL`**, **`OAUTH_PROXY_DEFAULT_CLIENT_REDIRECT_URIS`**: Configuration for an OAuth proxy.
 
 Refer to `src/config/index.ts` and the `.clinerules` file for the complete list and Zod schema definitions.
+
+## Docker
+
+Run the server in a Docker container with HTTP transport:
+
+```bash
+docker run -d --name mcp-fs-server \
+  -p 3010:3010 \
+  -e MCP_TRANSPORT_TYPE=http \
+  -e MCP_HTTP_PORT=3010 \
+  -e MCP_HTTP_HOST=0.0.0.0 \
+  -e MCP_AUTH_SECRET_KEY="your-secret-key-at-least-32-characters" \
+  -e MCP_LOG_LEVEL=info \
+  -e MCP_CONSOLE_LOG=true \
+  -v /path/to/data:/data \
+  -e FS_BASE_DIRECTORY=/data \
+  ghcr.io/yasien-c/filesystem-mcp-server:latest \
+  node dist/index.js
+```
+
+View logs:
+```bash
+docker logs -f mcp-fs-server
+```
 
 ## Usage with MCP Clients
 
@@ -211,6 +236,48 @@ To allow an MCP client (like an AI assistant) to use this server:
 
     **For HTTP Transport:**
     The client will need to know the server's URL (e.g., `http://localhost:3010`) and how to authenticate (e.g., providing a JWT Bearer token if `MCP_AUTH_SECRET_KEY` is set). Refer to your MCP client's documentation for HTTP server configuration.
+
+    **Generating a JWT Token:**
+
+    When `MCP_AUTH_SECRET_KEY` is set, clients must provide a valid JWT token in the `Authorization` header. The token must include:
+    - `cid` or `client_id` (required): Client identifier string
+    - `scp` (array) or `scope` (space-separated string): Authorization scopes (optional)
+
+    Generate a token using Node.js:
+    ```javascript
+    const jwt = require('jsonwebtoken');
+    const token = jwt.sign(
+      { 
+        cid: 'my-client-id',
+        scope: 'read write'
+      }, 
+      'your-secret-key-at-least-32-characters',
+      { expiresIn: '24h' }
+    );
+    console.log(token);
+    ```
+
+    Or generate inside a running Docker container:
+    ```bash
+    docker exec <container-name> node -e "
+    const jwt = require('jsonwebtoken');
+    const token = jwt.sign(
+      { cid: 'my-client', scope: 'read write' },
+      process.env.MCP_AUTH_SECRET_KEY,
+      { expiresIn: '7d' }
+    );
+    console.log(token);
+    "
+    ```
+
+    Use the token in requests:
+    ```bash
+    curl -X POST http://localhost:3010/mcp \
+      -H "Authorization: Bearer <your-jwt-token>" \
+      -H "Content-Type: application/json" \
+      -H "Accept: application/json, text/event-stream" \
+      -d '{"jsonrpc":"2.0","method":"initialize","params":{...},"id":1}'
+    ```
 
 Once configured and running, the client will detect the server and its available tools.
 
