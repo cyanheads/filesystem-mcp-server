@@ -1,0 +1,30 @@
+name: mcp-test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  mcp-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run build
+
+      - run: mkdir -p .mcp-test/sandbox
+
+      - name: Run mcp-test
+        uses: JiDarwish/mcp_server_testing_lab@1a00e50
+        with:
+          config: mcp-test.config.yaml
+          output: mcp-test-results.json
+          format: terminal

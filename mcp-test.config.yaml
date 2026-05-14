@@ -1,0 +1,13 @@
+server:
+  command: node
+  args:
+    - dist/index.js
+  env:
+    MCP_TRANSPORT_TYPE: stdio
+    MCP_LOG_LEVEL: error
+    FS_BASE_DIRECTORY: .mcp-test/sandbox
+checks:
+  - error-contract
+  - stdout-pollution
+output: mcp-test-results.json
+format: terminal
