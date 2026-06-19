@@ -1,0 +1,28 @@
+name: MCP Observatory
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  mcp-observatory:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Build server
+        run: npm run build
+      - name: Prepare filesystem sandbox
+        run: mkdir -p /tmp/mcp-observatory-filesystem-sandbox
+      - uses: KryptosAI/mcp-observatory/action@main
+        with:
+          target: mcp-observatory.target.json
+          deep: true
+          security: true
+          comment-on-pr: true
