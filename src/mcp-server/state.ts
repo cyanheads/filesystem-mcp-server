@@ -1,4 +1,5 @@
 import path from 'path';
+import fs from 'fs';
 import { config } from '../config/index.js';
 import { BaseErrorCode, McpError } from '../types-global/errors.js';
 import { logger } from '../utils/internal/logger.js';
@@ -140,6 +141,45 @@ class ServerState {
           BaseErrorCode.FORBIDDEN,
           `Access denied: The path "${requestedPath}" resolves to a location outside the allowed base directory.`,
           { ...context, requestedPath, resolvedPath: sanitizedAbsolutePath }
+        );
+      }
+      // --- Fix (issue #21): enforce symlink containment with realpath resolution ---
+      // The lexical startsWith check above can be bypassed by a symlink located
+      // INSIDE the base dir that points OUTSIDE it (Node fs follows symlinks).
+      // Resolve the *real* target (and the base) and re-verify confinement.
+      try {
+        const realBaseDir = fs.realpathSync.native(normalizedFsBaseDirectory);
+        let realTarget = sanitizedAbsolutePath;
+        // If the exact target doesn't exist yet (e.g. writeFile to a new path),
+        // the tool will create it; verify its parent's real location instead.
+        try {
+          realTarget = fs.realpathSync.native(normalizedSanitizedAbsolutePath);
+        } catch {
+          const parent = path.dirname(normalizedSanitizedAbsolutePath);
+          realTarget = path.join(fs.realpathSync.native(parent), path.basename(normalizedSanitizedAbsolutePath));
+        }
+        const realSep = path.sep;
+        const withinReal =
+          realTarget.startsWith(realBaseDir + realSep) || realTarget === realBaseDir;
+        if (!withinReal) {
+          const realBaseStripped = realBaseDir.replace(/\/$/, "");
+          logger.error(
+            `Symlink escape blocked: resolved target \"${realTarget}\" escapes FS_BASE_DIRECTORY realpath \"${realBaseStripped}\".`,
+            { ...context, requestedPath, resolvedRealPath: realTarget }
+          );
+          throw new McpError(
+            BaseErrorCode.FORBIDDEN,
+            `Access denied: The path \"${requestedPath}\" resolves (via symlink) to a location outside the allowed base directory.`,
+            { ...context, requestedPath, resolvedRealPath: realTarget }
+          );
+        }
+      } catch (error) {
+        if (error instanceof McpError) throw error;
+        // realpath unavailable (fs.lstat on a broken symlink, etc.) — rethrow as internal.
+        throw new McpError(
+          BaseErrorCode.INTERNAL_ERROR,
+          `Failed to verify path containment: ${error instanceof Error ? error.message : String(error)}`,
+          { ...context, requestedPath }
         );
       }
       logger.debug(`Path is within FS_BASE_DIRECTORY: ${sanitizedAbsolutePath}`, context);
