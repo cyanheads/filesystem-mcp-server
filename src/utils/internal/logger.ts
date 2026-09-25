@@ -594,4 +594,16 @@ export class Logger {
  * The singleton instance of the Logger.
  * Use this instance for all logging operations.
  */
-export const logger = Logger.getInstance();
+let lgr = Logger.getInstance();
+// Get and set level immediately or default to debug
+let logLevel = process.env.MCP_LOG_LEVEL as McpLogLevel | undefined;
+if (!logLevel)
+{
+  if (process.stdout.isTTY) {
+    console.warn("MCP_LOG_LEVEL not set, defaulting to ");
+  }
+  logLevel = "debug";
+}
+lgr.initialize(logLevel);
+
+export const logger = lgr;

@@ -20,13 +20,40 @@ class ServerState {
       const initContext = requestContextService.createRequestContext({ operation: 'ServerStateInit' });
       try {
         const sanitizedBase = sanitization.sanitizePath(this.fsBaseDirectory, { allowAbsolute: true, toPosix: true });
-        this.fsBaseDirectory = sanitizedBase.sanitizedPath;
+        const resolvedBase = path.resolve(sanitizedBase.sanitizedPath);
+        this.fsBaseDirectory = resolvedBase.replace(new RegExp(`${path.sep}+$`), '');
         logger.info(`Filesystem operations will be restricted to base directory: ${this.fsBaseDirectory}`, initContext);
       } catch (error) {
         logger.error(`Invalid FS_BASE_DIRECTORY configured: ${this.fsBaseDirectory}. It will be ignored.`, { ...initContext, error: error instanceof Error ? error.message : String(error) });
         this.fsBaseDirectory = null; // Disable if invalid
       }
     }
+  }
+
+  /**
+   * Helper to check whether a target path is within the configured FS base directory.
+   * Assumes both paths are absolute. If fsBaseDirectory is not set, always returns false.
+   */
+  private isWithinFsBaseDirectory(targetPath: string): boolean {
+    if (!this.fsBaseDirectory) return false;
+
+
+    const base = path.resolve(this.fsBaseDirectory);
+    const resolvedTarget = path.resolve(targetPath);
+
+    if (process.platform === 'win32') {
+      const baseLower = base.toLowerCase();
+      const targetLower = resolvedTarget.toLowerCase();
+      return (
+        targetLower === baseLower ||
+        targetLower.startsWith(baseLower + path.sep)
+      );
+    }
+
+    return (
+      resolvedTarget === base ||
+      resolvedTarget.startsWith(base + path.sep)
+    );
   }
 
   /**
@@ -49,6 +76,23 @@ class ServerState {
       const sanitizedPathInfo = sanitization.sanitizePath(newPath, { allowAbsolute: true, toPosix: true });
 
       this.defaultFilesystemPath = sanitizedPathInfo.sanitizedPath;
+      const sanitizedPath = sanitizedPathInfo.sanitizedPath;
+
+      // If a base directory is configured, ensure the default lives within it.
+      if (!this.isWithinFsBaseDirectory(sanitizedPath))
+      {
+        logger.error(
+          `Attemtped to set default filesystem path "${sanitizedPath}" outside FS_BASE_DIRECTORY "${this.fsBaseDirectory}".`,
+          { ...context, requestedPath: newPath, resolvedPath: sanitizedPath, fsBaseDirectory: this.fsBaseDirectory }
+        );
+        throw new McpError(
+          BaseErrorCode.FORBIDDEN,
+          `Default path "${sanitizedPath}" is outside the allowed base directory "${this.fsBaseDirectory}".`,
+          { ...context, requestedPath: newPath, resolvedPath: sanitizedPath, fsBaseDirectory: this.fsBaseDirectory }
+        );
+      }
+
+      this.defaultFilesystemPath = sanitizedPath;
       logger.info(`Default filesystem path set to: ${this.defaultFilesystemPath}`, context);
     } catch (error) {
       logger.error(`Failed to set default filesystem path: ${newPath}`, { ...context, error: error instanceof Error ? error.message : String(error) });
@@ -124,27 +168,20 @@ class ServerState {
        throw new McpError(BaseErrorCode.INTERNAL_ERROR, `Failed to process path: ${error instanceof Error ? error.message : String(error)}`, { ...context, path: absolutePath, originalError: error });
     }
 
-    // Enforce FS_BASE_DIRECTORY boundary if it's set
-    if (this.fsBaseDirectory) {
-      // Normalize both paths for a reliable comparison
-      const normalizedFsBaseDirectory = path.normalize(this.fsBaseDirectory);
-      const normalizedSanitizedAbsolutePath = path.normalize(sanitizedAbsolutePath);
-
-      // Check if the sanitized absolute path is within the base directory
-      if (!normalizedSanitizedAbsolutePath.startsWith(normalizedFsBaseDirectory + path.sep) && normalizedSanitizedAbsolutePath !== normalizedFsBaseDirectory) {
-        logger.error(
-          `Path access violation: Attempted to access path "${sanitizedAbsolutePath}" which is outside the configured FS_BASE_DIRECTORY "${this.fsBaseDirectory}".`,
-          { ...context, requestedPath, resolvedPath: sanitizedAbsolutePath, fsBaseDirectory: this.fsBaseDirectory }
-        );
-        throw new McpError(
-          BaseErrorCode.FORBIDDEN,
-          `Access denied: The path "${requestedPath}" resolves to a location outside the allowed base directory.`,
-          { ...context, requestedPath, resolvedPath: sanitizedAbsolutePath }
-        );
-      }
-      logger.debug(`Path is within FS_BASE_DIRECTORY: ${sanitizedAbsolutePath}`, context);
+    // Enforce FS_BASE_DIRECTORY boundary ALWAYS
+    if (!this.isWithinFsBaseDirectory(sanitizedAbsolutePath))
+    {
+      logger.error(
+        `Path access violation: Attemtped to access path "${sanitizedAbsolutePath}" which is outside the configured FS_BASE_DIRECTORY "${this.fsBaseDirectory}".`,
+        { ...context, requestedPath: sanitizedAbsolutePath, resolvedPath: sanitizedAbsolutePath, fsBaseDirectory: this.fsBaseDirectory }
+      );
+      throw new McpError(
+        BaseErrorCode.FORBIDDEN,
+        `Access denied: The path ${requestedPath}" resolves to "${sanitizedAbsolutePath}", which is outside the allowed base directory "${this.fsBaseDirectory}".`,
+        { ...context, requestedPath: requestedPath, resolvedPath: sanitizedAbsolutePath, fsBaseDirectory: this.fsBaseDirectory }
+      );
     }
-
+    logger.debug(`Path is within FS_BASE_DIRECTORY: ${sanitizedAbsolutePath}`, context);
     return sanitizedAbsolutePath;
   }
 }

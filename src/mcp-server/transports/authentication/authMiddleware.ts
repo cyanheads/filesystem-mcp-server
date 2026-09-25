@@ -16,7 +16,8 @@
 
 import { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js"; // Import from SDK
 import { NextFunction, Request, Response } from "express";
-import jwt from "jsonwebtoken";
+import { createVerifier, type VerifierOptions, type KeyFetcher, JwtHeader, Bufferable, DecodedJwt } from 'fast-jwt';
+import jwksClient from "jwks-rsa";
 import { config, environment } from "../../../config/index.js";
 import { logger, requestContextService } from "../../../utils/index.js";
 
@@ -48,14 +49,83 @@ if (environment === "production" && !config.mcpAuthSecretKey) {
   );
 }
 
+const JWT_AUDIENCE = process.env.MCP_JWT_AUDIENCE as string | undefined;
+const JWT_ISSUER = process.env.MCP_JWT_ISSUER as string | undefined;
+const JWT_URI = process.env.MCP_JWKS_URI as string | undefined;
+
+interface JwtPayload {
+  sub: string;
+  email?: string;
+  iat?: number;
+  exp?: number;
+  iss?: string;
+  cid?: string;
+  client_id?: string;
+  scp?: string;
+  scope?: string;
+  aud?: string | string[];
+  [key: string]: unknown;
+}
+
+const client = jwksClient({
+  jwksUri: JWT_URI!,
+  cache: true,
+  cacheMaxEntries: 5,
+  cacheMaxAge: 10 * 60 * 1000,
+  rateLimit: true,
+  jwksRequestsPerMinute: 10,
+});
+
+async function getKey(header: { kid?: string; alg?: string, aud?: string, iss?: string}): Promise<string> {
+  if (!header.kid) {
+    throw new Error('No "kid" in token header');
+  }
+  
+  const key = await client.getSigningKey(header.kid);
+  const signingKey = key.getPublicKey();
+
+  if (!signingKey) {
+    throw new Error('Unable to get signing key');
+  }
+
+  return signingKey;
+}
+
+const keyFetcher: KeyFetcher = async (decodeJwt: DecodedJwt) => {
+  if (!decodeJwt.header.kid) {
+    throw new Error('No "kid" in token header');
+  }
+
+  return await getKey(decodeJwt.header) as Bufferable;
+};
+
+const verifierOptions: Partial<VerifierOptions> & { key: KeyFetcher } = {
+  algorithms: ['RS256'],
+  allowedAud: JWT_AUDIENCE,
+  allowedIss: JWT_ISSUER,
+  key: keyFetcher,
+};
+
+const verifyJwtAsync = createVerifier(verifierOptions);
+
+async function verifyToken(token: string): Promise<JwtPayload> {
+  try
+  {
+    const payload = await verifyJwtAsync(token);
+    return payload as JwtPayload;
+  } catch (error: unknown) {
+    throw error;
+  }
+}
+
 /**
  * Express middleware for verifying JWT Bearer token authentication.
  */
-export function mcpAuthMiddleware(
+export async function mcpAuthMiddleware(
   req: Request,
   res: Response,
   next: NextFunction,
-): void {
+): Promise<void> {
   const context = requestContextService.createRequestContext({
     operation: "mcpAuthMiddleware",
     method: req.method,
@@ -120,7 +190,7 @@ export function mcpAuthMiddleware(
   const rawToken = tokenParts[1];
 
   try {
-    const decoded = jwt.verify(rawToken, config.mcpAuthSecretKey);
+    const decoded = await verifyToken(rawToken);
 
     if (typeof decoded === "string") {
       logger.warning(
@@ -133,39 +203,39 @@ export function mcpAuthMiddleware(
       return;
     }
 
+    const appid = decoded.appid
     // Extract and validate fields for SDK's AuthInfo
     const clientIdFromToken =
-      typeof decoded.cid === "string"
-        ? decoded.cid
-        : typeof decoded.client_id === "string"
-          ? decoded.client_id
-          : undefined;
+      typeof appid === "string"
+        ? appid
+        : undefined;
     if (!clientIdFromToken) {
       logger.warning(
-        "Authentication failed: JWT 'cid' or 'client_id' claim is missing or not a string.",
+        "Authentication failed: JWT 'appid' claim is missing or not a string.",
         { ...context, jwtPayloadKeys: Object.keys(decoded) },
       );
       res.status(401).json({
-        error: "Unauthorized: Invalid token, missing client identifier.",
+        error: "Unauthorized: Invalid token, missing app identifier.",
       });
       return;
     }
 
+    const scope = decoded.scp ?? decoded.scope;
     let scopesFromToken: string[];
     if (
-      Array.isArray(decoded.scp) &&
-      decoded.scp.every((s: unknown) => typeof s === "string")
+      Array.isArray(scope) &&
+      scope.every((s: unknown) => typeof s === "string")
     ) {
-      scopesFromToken = decoded.scp as string[];
+      scopesFromToken = scope as string[];
     } else if (
-      typeof decoded.scope === "string" &&
-      decoded.scope.trim() !== ""
+      typeof scope === "string" &&
+      scope.trim() !== ""
     ) {
-      scopesFromToken = decoded.scope.split(" ").filter((s: string) => s);
-      if (scopesFromToken.length === 0 && decoded.scope.trim() !== "") {
+      scopesFromToken = scope.split(" ").filter((s: string) => s);
+      if (scopesFromToken.length === 0 && scope.trim() !== "") {
         // handles case " " -> [""]
-        scopesFromToken = [decoded.scope.trim()];
-      } else if (scopesFromToken.length === 0 && decoded.scope.trim() === "") {
+        scopesFromToken = [scope.trim()];
+      } else if (scopesFromToken.length === 0 && scope.trim() === "") {
         // If scope is an empty string, treat as no scopes rather than erroring, or use a default.
         // Depending on strictness, could also error here. For now, allow empty array if scope was empty string.
         logger.debug(
@@ -195,7 +265,7 @@ export function mcpAuthMiddleware(
 
     // Log separately if other JWT claims like 'sub' (sessionId) are needed for app logic
     const subClaimForLogging =
-      typeof decoded.sub === "string" ? decoded.sub : undefined;
+      typeof decoded.sub  === "string" ? decoded.sub  : undefined;
     logger.debug("JWT verified successfully. AuthInfo attached to request.", {
       ...context,
       mcpSessionIdContext: subClaimForLogging,
@@ -205,16 +275,8 @@ export function mcpAuthMiddleware(
     next();
   } catch (error: unknown) {
     let errorMessage = "Invalid token";
-    if (error instanceof jwt.TokenExpiredError) {
-      errorMessage = "Token expired";
-      logger.warning("Authentication failed: Token expired.", {
-        ...context,
-        expiredAt: error.expiredAt, // Accessing error.expiredAt safely
-      });
-    } else if (error instanceof jwt.JsonWebTokenError) { // This already implies error is an instance of Error
-      errorMessage = `Invalid token: ${error.message}`; // Accessing error.message safely
-      logger.warning(`Authentication failed: ${errorMessage}`, { ...context });
-    } else if (error instanceof Error) { // Catch other generic Errors
+    // Removed specific handling of token error or expiration. Consider adding it back in.
+    if (error instanceof Error) { // Catch other generic Errors
       errorMessage = `Verification error: ${error.message}`; // Accessing error.message safely
       logger.error(
         "Authentication failed: Unexpected error during token verification.",
